@@ -1,3 +1,5 @@
+## LightBPF is part of LightPacket Library so for imports in this example you will find it always starts with LightPacket
+
 # LightBPF: Pure-Python Berkeley Packet Filter (cBPF) Engine
 
 **LightBPF** is a standalone, pure-Python Berkeley Packet Filter engine for packet sniffing, inspection, and network security applications. It tokenizes, parses, compiles, disassembles, and emulates classic BPF (cBPF / pcap-filter) bytecode with zero native C dependencies.
