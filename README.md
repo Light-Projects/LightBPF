@@ -1,4 +1,5 @@
-## LightBPF is part of LightPacket Library so for imports in this example you will find it always starts with LightPacket
+
+![](LightBPF.svg)
 
 # LightBPF: Pure-Python Berkeley Packet Filter (cBPF) Engine
 
