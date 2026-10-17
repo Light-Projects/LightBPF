@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "LightBPF"
+version = "1.1.0"
+description = "A flexible pure python cBPF Compiler"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MPL-2.0"
+license-files = ["LICENSE"]
+authors = [{name = "Adam Boulaaz", email = "adamboulaaz92@gmail.com"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Operating System :: OS Independent",
+]
+
+
+[project.urls]
+Homepage = "https://github.com/Light-Projects/LightBPF"
+
+[tool.setuptools.packages.find]
+include = ["LightBPF*"]
+exclude = ["tests*"]
+
+# Optional extras
+[project.optional-dependencies]
+dev = [
+    "pytest>=7"
+]
