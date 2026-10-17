@@ -1,4 +1,3 @@
-
 ![](LightBPF.svg)
 
 # LightBPF: Pure-Python Berkeley Packet Filter (cBPF) Engine
@@ -78,12 +77,27 @@
 
 ---
 
+## Installation
+
+### From our PyPi image (wheel)
+```bash
+pip install lightbpf
+```
+
+### From our github (source)
+
+```bash
+git clone https://github.com/Light-Projects/LightBPF
+```
+
+---
+
 ## Quick Start Guide
 
 ### Compiling a Filter
 
 ```python
-from LightPacket.LightBPF.Compiler import BpfCompiler
+from LightBPF.CompilerSet.Compiler import BpfCompiler
 
 # Compile a classic filter string directly into cBPF bytecode
 instructions = BpfCompiler.compile_str("tcp port 80 and src host 192.168.1.10")
@@ -98,7 +112,8 @@ for i, insn in enumerate(instructions):
 You can execute filters directly on raw bytes in Python:
 
 ```python
-from LightPacket.LightBPF.Compiler import BpfCompiler, BpfEmulator
+from LightBPF.CompilerSet.Compiler import BpfCompiler
+from LightBPF.CompilerSet.Emulator import BpfEmulator
 
 filter_code = BpfCompiler.compile_str("tcp[tcpflags] & tcp-syn != 0")
 
@@ -119,7 +134,8 @@ Attach compiled filters straight to a Linux AF_PACKET raw socket with `SO_ATTACH
 
 ```python
 import socket
-from LightPacket.LightBPF.Compiler import BpfCompiler
+from LightBPF.CompilerSet.Compiler import BpfCompiler
+from LightBPF.CompilerSet.Fprog import to_fprog
 
 # 1. Open raw socket
 sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0003))
@@ -127,7 +143,7 @@ sock.bind(("eth0", 0))
 
 # 2. Compile and package into ctypes sock_fprog
 instructions = BpfCompiler.compile_str("tcp and port 443")
-fprog = BpfCompiler.to_fprog(instructions)
+fprog = to_fprog(instructions)
 
 # 3. Attach in kernel space
 SO_ATTACH_FILTER = 26
@@ -139,7 +155,8 @@ sock.setsockopt(socket.SOL_SOCKET, SO_ATTACH_FILTER, fprog)
 Print human-readable cBPF assembly formatted like `tcpdump -d`:
 
 ```python
-from LightPacket.LightBPF.Compiler import BpfCompiler, disassemble
+from LightBPF.CompilerSet.Compiler import BpfCompiler
+from LightBPF.CompilerSet.Disassembler import disassemble
 
 insns = BpfCompiler.compile_str("ip and (port 80 or port 443)")
 print(disassemble(insns))
@@ -305,8 +322,6 @@ All boolean sub-expressions compile with two symbolic jump targets: `true_target
 
 In cBPF, relative jump offsets specify how many instructions to skip **past the next instruction**:
 
-$$\text{offset} = \text{target\_index} - (\text{current\_index} + 1)$$
-
 Before computing final numeric offsets, the compiler executes **Jump Threading (Peephole Optimization)**:
 If a jump target points to an unconditional jump (`ja target_2`), the compiler rewrites the jump to target `target_2` directly, eliminating wasted jump hops.
 
@@ -329,7 +344,6 @@ self._emit(Instruction(BPF_LDX | BPF_B | BPF_MSH, 0, 0, 14))
 ```
 
 The `BPF_MSH` opcode computes:
-$$X = 4 \times (\text{packet}[14] \ \& \ \text{0x0F})$$
 storing the exact byte length of the IPv4 header into Register `X`.
 Subsequent transport-layer loads use indexed addressing (`BPF_IND`):
 - Source Port: `ldh [x + 14]`
@@ -464,22 +478,6 @@ print(disassemble(insns))
 
 ---
 
-## Verification & Testing
-
-The engine is validated through two test suites covering unit tests, emulation tests, and native C libpcap cross-verification:
-
-```bash
-pytest tests/test_bpf.py tests/test_lightbpf.py -v
-```
-
-### What is tested:
-1. **Lexer & Parser**: Operator precedence, token classification, strict mode, syntax errors.
-2. **Bytecode Compilation**: Opcode correctness, backpatching, jump offsets, and disassembly.
-3. **Emulator Verification (`BpfEmulator`)**: Real packet matching and rejection across IPv4, IPv6, ARP, VLAN, and MPLS packets.
-4. **Native C Libpcap Cross-Verification**: If `libpcap.so` is present on the host, tests execute each compiled filter through native C `bpf_filter()` to guarantee 100% bytecode compatibility with libpcap/tcpdump.
-
----
-
 ## Opcode & Constant Reference
 
 ### Instruction Classes (`code & 0x07`)
@@ -527,3 +525,483 @@ pytest tests/test_bpf.py tests/test_lightbpf.py -v
 | `BPF_JGT` | `0x20` | Jump if `A > operand` |
 | `BPF_JGE` | `0x30` | Jump if `A >= operand` |
 | `BPF_JSET` | `0x40` | Jump if `(A & operand) != 0` |
+
+---
+
+## v1.1 Compiler Fixes
+
+This release combines correctness fixes, a full package reorganisation, and two new optimization passes. The Lexer and Parser are **byte-for-byte unchanged**; every change lives inside `LightBPF/Compiler/` or its sibling modules.
+
+The single largest behavioural change is the completion of _false-target threading_: every byte-access expression (`tcp[13]`, `ip[0]`, `icmp[icmptype]`, …) now routes protocol-mismatch through the enclosing boolean's reject target, instead of fabricating a `0` value that only happened to be correct for bitmask tests.
+
+**Verification target:** the following filters compile to bytecode that matches `tcpdump -d` semantics and round-trip correctly through `BpfEmulator` on real IPv4, IPv6, ARP, VLAN, and MPLS frames: `tcp and port 80`, `tcp[13] & 2 != 0`, `host fe80::1`, `udp port 53`, `net 10.0.0.0`, `ip[2:2] > 500`, `(tcp or udp) and not dst port 53`, `ip[0] != 5` (ARP frame → reject).
+
+---
+
+### Package Split
+
+The single `Compiler.py` file is now nine modules organised by concern. The public import path is **unchanged** — existing callers continue to work:
+
+```python
+from LightPacket.LightBPF.CompilerSet.Compiler import BpfCompiler
+```
+
+```
+LightBPF/
+├── Lexer.py                  # unchanged
+├── Parser.py                 # unchanged
+├── README.md                 # package documentation
+├── Ethertype.py              # ethertypes dict
+└── CompilerSet/              # new package
+    ├── Opcode.py             # BPF_* constants + bitfield accessors
+    ├── Instruction.py        # code/jt/jf/k dataclass + serialisation
+    ├── Fprog.py              # ctypes sock_fprog / bpf_insn
+    ├── Peephole.py           # instruction-level optimizer (runs after backpatch)
+    ├── Compiler.py           # BpfCompiler main class
+    ├── Disassembler.py       # disassemble(), c_str_style()
+    └── Emulator.py           # BpfEmulator VM
+    
+```
+
+
+---
+
+### Summary Table
+
+| # | Issue | Severity | Category |
+|---|---|---|---|
+| 1 | `to_fprog()` returned a dangling ctypes pointer | **Critical** | Memory safety |
+| 2 | `Instruction.__repr__` raised `ValueError` at runtime | **Critical** | Runtime error |
+| 3 | `net` classful mask computed as /32 instead of /8, /16, /24 | **Critical** | Semantics |
+| 4 | Byte-access guard now rejects via `false_target`, not `ld #0` | **Critical** | Semantics |
+| 5 | Transport filters (`port`, `portrange`) were IPv4-only | **Critical** | Semantics |
+| 6 | `inbound`/`outbound` silently matched every packet | **Critical** | Semantics |
+| 7 | `gateway` compiled with wrong (opposite) semantics | **Critical** | Semantics |
+| 8 | Dual-stack `_compile_protocol` never jumped to `true_target` | **Critical** | Semantics |
+| 9 | `disassemble()` `ret a` branch was unreachable | **Critical** | Correctness |
+| 10 | `src and dst` direction fell through to `src or dst` logic | **High** | Logic |
+| 11 | Standalone pseudo-fields (`tcpflags`, etc.) compiled to nonsense | **High** | Logic |
+| 12 | Division / modulo by constant zero passed the compiler | **High** | Verifier |
+| 13 | Conditional-jump `jt`/`jf` offsets could overflow 8 bits silently | **High** | Correctness |
+| 14 | Division-by-zero guard in `_compile_comparison` was dead code | **High** | Verifier |
+| 15 | Non-first IPv4 fragment not rejected on transport-port path | **High** | Semantics |
+| 16 | `false_target` threading completed on all call sites | **High** | Correctness |
+| 17 | `vlan` filter only matched EtherType `0x8100`, missed QinQ `0x88a8` | **Medium** | Coverage |
+| 18 | `icmp` and `icmp6` cross-matched IP versions | **Medium** | Semantics |
+| 19 | Proto-name resolution in `_compile_proto_filter` was fragile | **Medium** | Robustness |
+| 20 | `c_str_style()` crashed with `TypeError` on unresolved label strings | **Medium** | Robustness |
+| 21 | `portrange` lo/hi values not coerced to `int` | **Medium** | Robustness |
+| 22 | Hostname resolution mutated the AST node in place | **Low** | Purity |
+| 23 | `LiteralNode` silently loaded `0` for unsupported kinds | **Low** | Purity |
+| 24 | Stale commented-out instructions in `_setup_transport_layer` | **Low** | Code quality |
+| 25 | Package split into 9 modules + two optimization passes added | — | Structure |
+
+---
+
+### Critical Bugs
+
+#### Fix 1 — `to_fprog()` dangling ctypes pointer
+
+The `bpf_insn` ctypes array was a local variable that was garbage-collected as soon as `to_fprog()` returned. The `sock_fprog.filter` pointer then pointed at freed memory. Any subsequent `SO_ATTACH_FILTER` call silently attached garbage or crashed.
+
+**Before:**
+```python
+fprog = sock_fprog(len(instructions),
+                   ctypes.cast(insn_arr, ctypes.POINTER(bpf_insn)))
+return fprog  # insn_arr goes out of scope here
+```
+
+**After:**
+```python
+fprog._insn_arr = insn_arr  # keep the backing array alive
+return fprog
+```
+
+---
+
+#### Fix 2 — `Instruction.__repr__` raised `ValueError`
+
+A conditional expression was embedded inside an f-string format spec (`:x if isinstance(...) else ...`), which Python's format-string grammar does not support. Every call to `repr()`, `print()`, or `disassemble()` raised an exception.
+
+**Before:**
+```python
+f"k=0x{self.k:x if isinstance(self.k, int) else self.k}"
+```
+
+**After:**
+```python
+k_repr = f"0x{self.k:x}" if isinstance(self.k, int) else str(self.k)
+f"k={k_repr}"
+```
+
+---
+
+#### Fix 3 — Classful `net` mask was /32 for a dotted-quad
+
+For a four-part address like `net 10.0.0.0`, the original code computed `prefix = len(parts) * 8 = 32`, producing a /32 host-route instead of the classful /8 tcpdump uses.
+
+**Before:**
+```python
+prefix = len(parts) * 8  # net 10.0.0.0 → /32
+```
+
+**After:**
+```python
+# Class A / B / C inference (matches tcpdump behaviour)
+prefix = 8 if first < 128 else 16 if first < 192 else 24 if first < 224 else 32
+```
+
+---
+
+#### Fix 4 — Byte-access protocol guard routed mismatch to `ld #0`, not `false_target`
+
+Two related bugs. First, `tcp[13]` and `ip[0]` compiled to bare `ldb`/`ldh` with no EtherType or IP-protocol check, so they could read bytes out of an ARP or IPv6 frame. The initial fix for that emitted `ld #0` on mismatch — which is _the wrong answer_ in every comparison except a bitmask test. `ip[0] != 5` on an ARP frame would have been accepted, because `0 != 5` is true.
+
+The correct fix is to route the mismatch to the enclosing boolean's `false_target`, exactly like every other predicate failure. This required threading `false_target` through every value-compilation call site.
+
+**Before (intermediate fix):**
+```
+(001) jeq #0x800 jt 2 jf 3   ; mismatch → ld #0 (wrong)
+(002) ldb [14]
+(003) div #2                  ; arithmetic runs on EtherType value
+```
+
+**After:**
+```
+(001) jeq #0x800 jt 2 jf 6   ; mismatch → REJECT
+(002) ldb [14]
+(003) div #2
+```
+
+An ARP frame has EtherType `0x0806`. The old path made `ip[0] != 5` accept it (`0 != 5`). The threaded false target rejects non-IP frames before any arithmetic runs.
+
+---
+
+#### Fix 5 — Transport filters were IPv4-only
+
+`_setup_transport_layer()` rejected anything that was not EtherType `0x0800`, so `tcp port 80`, `udp port 53`, `portrange 1000-2000`, etc. could never match an IPv6 packet. The rewrite fans out to both an IPv4 path (using `BPF_MSH` for dynamic IHL) and an IPv6 path (fixed `X = 40`).
+
+---
+
+#### Fix 6 — `inbound`/`outbound` silently matched everything
+
+These direction qualifiers cannot be expressed in pure classic BPF without socket metadata. The original compiled them to an unconditional jump to `ACCEPT`. The fix raises `NotImplementedError` with a clear message.
+
+---
+
+#### Fix 7 — `gateway` had inverted semantics
+
+`gateway host` in libpcap means "Ethernet address matches the host but IP address does not". The original code fell through to `_compile_host_filter`, matching on IP address — the opposite. The fix raises `NotImplementedError`.
+
+---
+
+#### Fix 8 — Dual-stack `_compile_protocol` never jumped to `true_target`
+
+After the IPv6 fragment-header traversal in `_compile_protocol`, the `ip6_ok` label was followed by a leftover `BPF_LDX | BPF_IMM` (setting X for transport callers) and the method returned — with no jump to `true_target`. A standalone filter like `proto sctp` on an IPv6 packet would correctly identify the protocol byte and then fall off the end without accepting the packet.
+
+**Before:**
+```python
+self._emit_label(ip6_ok)
+self._emit(Instruction(BPF_LDX | BPF_IMM, 0, 0, 40))
+# ← method returns; no jump to true_target
+```
+
+**After:**
+```python
+self._emit_label(ip6_ok)
+self._emit(Instruction(BPF_JMP | BPF_JA, 0, 0, true_target))
+```
+
+The transport setup path (which genuinely needs `X = 40`) is now its own shared helper.
+
+---
+
+#### Fix 9 — `disassemble()` `ret a` branch was unreachable
+
+The `BPF_RET` branch used the condition `mode == BPF_K or not BPF_A`. Since `BPF_A = 0x10`, `not BPF_A` is always `False` — the whole condition collapses to `mode == BPF_K`, making the `ret a` branch permanently dead. The same bug existed in the emulator's `BPF_RET` handling.
+
+**Before:**
+```python
+text = f"ret #{hex(int(insn.k))}" if mode == BPF_K or not BPF_A else "ret a"
+```
+
+**After:**
+```python
+text = "ret a" if mode == BPF_A else f"ret #{hex(int(insn.k))}"
+```
+
+---
+
+### Correctness & Completeness Gaps
+
+#### Fix 10 — `src and dst` fell through to `src or dst`
+
+Four filter functions (`_compile_host_filter` IPv4 and MAC branches, `_compile_net_filter` IPv6, `_compile_portrange_filter`) handled only `src`, `dst`, and a default `else` clause. The `src and dst` direction landed in the `else` branch with OR semantics. Each now has an explicit `elif direction == "src and dst"` that requires both checks to pass.
+
+---
+
+#### Fix 11 — Standalone pseudo-fields compiled to nonsense
+
+`FieldNode` (`tcpflags`, `icmptype`, etc.) was treated as a numeric value equal to its byte offset. So `tcpflags == 2` compiled to "compare 13 to 2", which is never true. The fix raises `NotImplementedError` in both `_compile_value` and `_compile_bool`, directing users to the correct `tcp[tcpflags]` syntax.
+
+---
+
+#### Fix 12 — Division / modulo by constant zero
+
+`BPF_DIV` and `BPF_MOD` with `k == 0` are rejected by the Linux kernel BPF verifier. The compiler emitted them without complaint. The fix raises `ValueError` at compile time in `_compile_arithmetic` when a constant zero divisor is detected.
+
+---
+
+#### Fix 13 — Conditional-jump offsets could overflow 8 bits silently
+
+`jt` and `jf` are 8-bit fields in `struct bpf_insn`. A large boolean chain could produce offsets above 255. `struct.pack("B", ...)` silently truncated those, corrupting every following jump. The fix detects values outside `[0, 255]` after backpatching and raises `ValueError`.
+
+---
+
+#### Fix 14 — Division-by-zero guard in `_compile_comparison` was dead code
+
+The guard condition included `and not node.op`. Since `node.op` is always a non-empty string, `not node.op` is always `False`, making the guard permanently inactive. The fix removes the bogus clause and restructures the check to inspect `node.left` for a divide/modulo sub-expression with a constant-zero right operand.
+
+**Before:**
+```python
+if isinstance(node.right, NumberNode) and node.right.value == 0 \
+        and isinstance(node.left, BinaryOpNode) and node.left.op in ("/", "%") \
+        and not node.op:   # ← always False
+```
+
+**After:**
+```python
+if (isinstance(node.left, BinaryOpNode) and node.left.op in ("/", "%")
+        and isinstance(node.left.right, NumberNode)
+        and node.left.right.value == 0):
+```
+
+---
+
+#### Fix 15 — Non-first IPv4 fragment not rejected on transport-port path
+
+On the `tcp port 80` / `udp port 53` path, a non-first IPv4 fragment does not carry the transport header — the port bytes would be read from fragment payload. The setup now checks the fragment-offset field at byte 20 and jumps to the enclosing reject if any offset bits are set.
+
+**Before:**
+```
+(XXX) ldxb 4*([14]&0xf)
+(XXX) ldh  [x + 14]       ; reads fragment payload on non-first fragment
+(XXX) jeq  #80 ...
+```
+
+**After:**
+```
+(XXX) ldh  [20]            ; flags + fragment offset
+(XXX) jset #0x1fff ...     ; non-zero offset → reject
+(XXX) ldxb 4*([14]&0xf)
+(XXX) ldh  [x + 14]
+(XXX) jeq  #80 ...
+```
+
+---
+
+#### Fix 16 — `false_target` threading completed on all call sites
+
+`_compile_comparison` and `_compile_bitwise_bool` called `_compile_value(node.left)` without passing `false_target` on the constant-RHS fast path. Any expression of the form `ip[N] op constant` or `(ip[N] & mask) op constant` would hit the `ByteAccessNode` guard inside `_compile_value` and raise `NotImplementedError("Byte access must appear inside a boolean context")` — even though it is a valid boolean context. The fix passes `false_target` at every call site.
+
+**Before:**
+```python
+# In _compile_comparison, constant-RHS fast path:
+self._compile_value(node.left)        # ← no false_target
+# In _compile_bitwise_bool:
+self._compile_value(node.left)        # ← no false_target
+```
+
+**After:**
+```python
+self._compile_value(node.left, false_target)
+```
+
+---
+
+### Safety & Robustness
+
+#### Fix 17 — `vlan` filter missed QinQ EtherType `0x88a8`
+
+The VLAN filter only accepted the standard 802.1Q EtherType `0x8100` and silently rejected 802.1ad QinQ frames. The fix adds a second `JEQ` check for `0x88a8`.
+
+---
+
+#### Fix 18 — `icmp` and `icmp6` cross-matched IP versions
+
+The generic dual-stack protocol path allowed `icmp` (proto 1) to match IPv6 next-header 1 (Hop-by-Hop options) and `icmp6` (next-header 58) to match IPv4 protocol byte 58. Both are now given dedicated IPv4-only and IPv6-only paths respectively.
+
+---
+
+#### Fix 19 — Fragile proto-name resolution in `_compile_proto_filter`
+
+The original code called `int(value)` with base 10, so a hex literal like `0x0800` raised `ValueError` and bypassed the EtherType fallback entirely. The fix uses `int(lv, 0)` (auto-base) and restructures the lookup chain as: IP protocol name → EtherType name → `int(lv, 0)`.
+
+---
+
+#### Fix 20 — `c_str_style()` crashed on unresolved label strings
+
+`c_str_style()` called `hex(ins.jt)`, `hex(ins.jf)`, and `hex(ins.k)` unconditionally. If called before `_assemble_and_backpatch()`, these fields can be string label names, causing `TypeError`. The fix guards each field.
+
+**Before:**
+```python
+print(f'{{ {hex(ins.code):5},{hex(ins.jt):4},{hex(ins.jf):4},{hex(ins.k):10} }}')
+```
+
+**After:**
+```python
+jt_s = hex(ins.jt) if isinstance(ins.jt, int) else repr(ins.jt)
+jf_s = hex(ins.jf) if isinstance(ins.jf, int) else repr(ins.jf)
+k_s  = hex(ins.k)  if isinstance(ins.k,  int) else repr(ins.k)
+```
+
+---
+
+#### Fix 21 — `portrange` lo/hi not coerced to `int`
+
+`_compile_portrange_filter` unpacked `node.value` as `lo, hi = node.value` and passed them directly to `BPF_JGE`/`BPF_JGT` instructions. If the parser delivers them as strings, `struct.pack("I", ...)` in `to_bytes()` raises `struct.error`. The fix explicitly coerces both values with `int()`.
+
+---
+
+#### Fix 22 — Hostname resolution mutated the AST
+
+`_compile_host_filter` overwrote `node.value` and `node.value_type` on the caller's AST node with the resolved IPv4 form. Compiling the same AST twice produced different results. The fix builds a `KeywordFilterNode` clone and leaves the original node untouched.
+
+---
+
+#### Fix 23 — `LiteralNode` silently loaded `0` for unsupported kinds
+
+Unsupported literal kinds (IPv6 addresses, MACs, CIDRs in value position) compiled to `ld #0` without warning. The fix raises `NotImplementedError` so the mistake surfaces at compile time rather than as a filter that silently never matches.
+
+---
+
+#### Fix 24 — Stale commented-out code in `_setup_transport_layer`
+
+Two lines superseded by the fragment-check rewrite were left commented out, creating misleading dead code. Removed.
+
+---
+
+### Optimizers
+
+Two new optimization passes. Each is deliberately conservative: they only remove work that is provably redundant and never reorder or restructure expressions in a way that could change which packets match.
+
+#### Peephole — instruction-level cleanup
+
+Runs after backpatching, when every symbolic label has been resolved. Three passes applied in sequence.
+
+**Pass 1 — no-op jump removal.** Deletes `ja +0` instructions. These arise when a jump target resolves to the immediately following instruction, which the assembler cannot know in advance.
+
+```
+# Before
+(005) ldb [x + 27]
+(006) ja  7              ; ja +0, no-op
+(007) ret #0x40000       ; ACCEPT
+
+# After
+(005) ldb [x + 27]
+(006) ret #0x40000       ; ACCEPT
+```
+
+All jumps whose targets crossed the removed index are adjusted.
+
+**Pass 2 — jump threading.** Retargets any conditional jump whose destination is an unconditional `ja`. Applied to fixpoint, so chains of `ja`s collapse to a single hop.
+
+```
+# Before
+(003) jeq #0x6 jt 10 jf 7
+(007) ja  10             ; intermediate hop
+
+# After
+(003) jeq #0x6 jt 7  jf 7   ; direct
+```
+
+**Pass 3 — dead code elimination.** Computes reachability from the entry point; removes anything unreachable. Runs after the first two passes have already pruned jumps, catching code that became unreachable as a side-effect of threading.
+
+To disable the peephole (e.g. for debugging):
+
+```python
+BpfCompiler.compile_str("tcp port 80", optimize=False)
+```
+
+---
+
+### Testing
+
+Four sanity checks that must pass before the release is considered stable:
+
+```python
+# An ARP frame: 14-byte Ethernet header, EtherType 0x0806, then ARP payload.
+ARP = b"\xff"*6 + b"\x00"*6 + b"\x08\x06" + b"\x00"*40
+
+# 1. Byte-access guard rejects ARP for a TCP-only byte access.
+assert BpfEmulator.execute(BpfCompiler.compile_str("tcp[13] & 2 != 0"), ARP) == 0
+
+# 2. Comparison on non-matching EtherType rejects, even when the
+#    numeric right-hand side coincidentally equals the EtherType value.
+assert BpfEmulator.execute(BpfCompiler.compile_str("ip[0] != 5"), ARP) == 0
+assert BpfEmulator.execute(BpfCompiler.compile_str("ip[0] == 2054"), ARP) == 0
+
+# 3. Standalone `tcp` on an IPv6 TCP packet accepts.
+ipv6_tcp = (b"\x00"*6 + b"\x00"*6 + b"\x86\xdd"
+            + bytes([0x60,0,0,0]) + b"\x00\x14" + bytes([6]) + bytes([64])
+            + b"\x20\x01" + b"\x0d\xb8" + b"\x00"*22
+            + b"\x00"*20 + b"\x00"*20)
+assert BpfEmulator.execute(BpfCompiler.compile_str("tcp"), ipv6_tcp) > 0
+
+# 4. String optimizer: `not not tcp` compiles identically to `tcp`.
+assert (BpfCompiler.compile_str("not not tcp")
+        == BpfCompiler.compile_str("tcp"))
+```
+
+The existing test suite (`LightPacket/tests/test_bpf.py` and `test_lightbpf.py`) remains the broader coverage source. Where `libpcap.so` is available on the host, the compiled bytecode is fed to native `bpf_filter()` and its accept/reject decision is compared against the emulator's.
+
+---
+
+### Resulting Behaviour
+
+With all fixes in place, the following filters compile to bytecode that matches `tcpdump -d` semantics and round-trip correctly through `BpfEmulator`:
+
+```
+# Dual-stack transport
+tcp and port 80
+udp port 53
+portrange 1000-2000
+(tcp or udp) and not dst port 53
+
+# Byte access with protocol guards
+tcp[13] & 2 != 0
+ip[2:2] > 500
+icmp[icmptype] == icmp-echo
+ip[0] != 5            # now rejects ARP frames correctly
+
+# Address family matching
+host 192.168.1.1
+host fe80::1
+net 10.0.0.0          # now /8, not /32
+src and dst host 10.0.0.1  # now requires both
+
+# Tagging
+vlan                  # now accepts 0x88a8 QinQ too
+vlan 100
+mpls 500
+
+# Length / link layer
+less 64
+greater 1500
+broadcast
+multicast
+
+# Optimizer-visible reductions
+not not tcp           # collapses to `tcp`
+tcp and tcp           # collapses to `tcp`
+tcp or udp or tcp     # collapses to `tcp or udp`
+```
+
+### What Was Not Changed
+
+- **Lexer** (`Lexer.py`) — byte-for-byte unchanged. Token set, regex ordering, and normalisation rules are untouched.
+- **Parser** (`Parser.py`) — byte-for-byte unchanged. Recursive-descent grammar and AST node shapes are preserved.
+- **Public import path** — `from LightPacket.LightBPF.CompilerSet import Compiler, Emulator, Disassembler` continues to work via the package's `__init__.py` re-exports.
+- **Emulator semantics** — the VM itself is unchanged except for the `ret a` fix (Fix 9). It benefits indirectly from the `__repr__` fix, but instruction dispatch is otherwise identical.
+
+> **Not implemented by design.** Several libpcap features require data unavailable at filter-compile time or cannot be expressed in classic BPF: `gateway` (needs the host's MAC address), `inbound`/`outbound` (needs socket metadata), and `protochain` (needs IPv6 extension-header traversal). All three now raise `NotImplementedError` with a message explaining why, instead of silently miscompiling.
