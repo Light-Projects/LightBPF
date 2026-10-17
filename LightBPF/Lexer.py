@@ -5,6 +5,7 @@
 import re
 import ipaddress
 from typing import NamedTuple, List
+from LightPacket.LightBPF.Ethertype import ETHERTYPE_KEYWORDS
 
 
 class Token(NamedTuple):
@@ -54,13 +55,7 @@ class BpfLexer:
         "experimentation-1": 253, "experimentation-2": 254, "reserved": 255
     }
 
-    ETHERTYPE_KEYWORDS = {
-        "ip": 0x0800, "ip4": 0x0800,
-        "ip6": 0x86DD,
-        "arp": 0x0806, "rarp": 0x8035,
-        "vlan": 0x8100, "mpls": 0x8847,
-        "pppoed": 0x8863, "pppoes": 0x8864,
-    }
+    ETHERTYPE_KEYWORDS = ETHERTYPE_KEYWORDS
 
     # Link-layer qualifiers usable as ether[..], wlan[..], etc.
     DLT_LINKS = {"ether": 1, "wlan": 105, "ppp": 9, "fddi": 10, "tr": 6,
