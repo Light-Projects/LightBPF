@@ -28,10 +28,6 @@ Known compiler bug captured as xfail:
 
 import struct
 import socket
-import sys
-import os
-import io
-
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -39,18 +35,18 @@ import pytest
 # Edit HERE if your layout is different.
 # ---------------------------------------------------------------------------
 
-from LightBPF.Lexer import BpfLexer, Token
-from LightBPF.Parser import (
+from LightPacket.LightBPF.Lexer import BpfLexer, Token
+from LightPacket.LightBPF.Parser import (
     BpfParser, ASTNode, BinaryOpNode, UnaryOpNode,
     ProtocolNode, KeywordFilterNode, ByteAccessNode,
     LengthNode, NumberNode, LiteralNode, FieldNode,
 )
-from LightBPF.CompilerSet.Compiler import BpfCompiler
-from LightBPF.CompilerSet.Emulator import BpfEmulator
-from LightBPF.CompilerSet.Instruction import Instruction
-from LightBPF.CompilerSet.Disassembler import disassemble, c_str_style
-from LightBPF.CompilerSet.Fprog import to_fprog, bpf_insn, sock_fprog
-from LightBPF.CompilerSet.Opcode import (
+from LightPacket.LightBPF.CompilerSet.Compiler import BpfCompiler
+from LightPacket.LightBPF.CompilerSet.Emulator import BpfEmulator
+from LightPacket.LightBPF.CompilerSet.Instruction import Instruction
+from LightPacket.LightBPF.CompilerSet.Disassembler import disassemble, c_str_style
+from LightPacket.LightBPF.CompilerSet.Fprog import to_fprog, bpf_insn, sock_fprog
+from LightPacket.LightBPF.CompilerSet.Opcode import (
     BPF_LD, BPF_LDX, BPF_ST, BPF_STX, BPF_ALU, BPF_JMP, BPF_RET, BPF_MISC,
     BPF_W, BPF_H, BPF_B,
     BPF_IMM, BPF_ABS, BPF_IND, BPF_MEM, BPF_LEN, BPF_MSH,
@@ -60,7 +56,7 @@ from LightBPF.CompilerSet.Opcode import (
     BPF_K, BPF_X, BPF_TAX, BPF_TXA, BPF_A, BPF_MAX_BUF_LEN,
     insn_class, insn_size, insn_mode, insn_op, insn_src,
 )
-from LightBPF.CompilerSet import Peephole
+from LightPacket.LightBPF.CompilerSet import Peephole
 
 
 # ===========================================================================
