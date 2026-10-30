@@ -2,10 +2,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+from typing import NamedTuple, List
 import re
 import ipaddress
-from typing import NamedTuple, List
-from LightPacket.LightBPF.Ethertype import ETHERTYPE_KEYWORDS
+try:
+    from LightPacket.LightBPF.Ethertype import ETHERTYPE_KEYWORDS
+except ImportError:
+    from LightBPF.Ethertype import ETHERTYPE_KEYWORDS
 
 
 class Token(NamedTuple):
@@ -24,7 +27,7 @@ class BpfLexer:
 
     IP_PROTOCOLS = {
         "hopopt": 0, "icmp": 1, "igmp": 2, "ggp": 3, "ipv4": 4, "st": 5, "tcp": 6,
-        "cbt": 7, "egp": 8, "igp": 9, "bbn-rcc-mon": 10, "nvp-ii": 11, "pup": 12,
+        "cbt": 7, "egp": 8, "igrp": 9, "bbn-rcc-mon": 10, "nvp-ii": 11, "pup": 12,
         "argus": 13, "emcon": 14, "xnet": 15, "chaos": 16, "udp": 17, "mux": 18,
         "dcn-meas": 19, "hmp": 20, "prm": 21, "xns-idp": 22, "trunk-1": 23,
         "trunk-2": 24, "leaf-1": 25, "leaf-2": 26, "rdp": 27, "irtp": 28,

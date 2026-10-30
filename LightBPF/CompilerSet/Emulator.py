@@ -9,15 +9,26 @@ captured length (0 = reject).
 """
 import struct
 from typing import List
-from LightPacket.LightBPF.CompilerSet.Instruction import Instruction
-from LightPacket.LightBPF.CompilerSet.Opcode import (
-    BPF_LD, BPF_LDX, BPF_ST, BPF_STX, BPF_ALU, BPF_JMP, BPF_RET, BPF_MISC,
-    BPF_W, BPF_H ,BPF_IMM, BPF_ABS, BPF_IND, BPF_MEM, BPF_LEN, BPF_MSH,
-    BPF_ADD, BPF_SUB, BPF_MUL, BPF_DIV, BPF_OR, BPF_AND, BPF_LSH, BPF_RSH,
-    BPF_NEG, BPF_MOD, BPF_XOR,
-    BPF_JA, BPF_JEQ, BPF_JGT, BPF_JGE, BPF_JSET,
-    BPF_X, BPF_TAX, BPF_TXA, BPF_A,
-)
+try:
+    from LightPacket.LightBPF.CompilerSet.Instruction import Instruction
+    from LightPacket.LightBPF.CompilerSet.Opcode import (
+        BPF_LD, BPF_LDX, BPF_ST, BPF_STX, BPF_ALU, BPF_JMP, BPF_RET, BPF_MISC,
+        BPF_W, BPF_H, BPF_IMM, BPF_ABS, BPF_IND, BPF_MEM, BPF_LEN, BPF_MSH,
+        BPF_ADD, BPF_SUB, BPF_MUL, BPF_DIV, BPF_OR, BPF_AND, BPF_LSH, BPF_RSH,
+        BPF_NEG, BPF_MOD, BPF_XOR,
+        BPF_JA, BPF_JEQ, BPF_JGT, BPF_JGE, BPF_JSET,
+        BPF_X, BPF_TAX, BPF_TXA, BPF_A,
+    )
+except ImportError:
+    from LightBPF.CompilerSet.Instruction import Instruction  # type: ignore
+    from LightBPF.CompilerSet.Opcode import (  # type: ignore
+        BPF_LD, BPF_LDX, BPF_ST, BPF_STX, BPF_ALU, BPF_JMP, BPF_RET, BPF_MISC,
+        BPF_W, BPF_H, BPF_IMM, BPF_ABS, BPF_IND, BPF_MEM, BPF_LEN, BPF_MSH,
+        BPF_ADD, BPF_SUB, BPF_MUL, BPF_DIV, BPF_OR, BPF_AND, BPF_LSH, BPF_RSH,
+        BPF_NEG, BPF_MOD, BPF_XOR,
+        BPF_JA, BPF_JEQ, BPF_JGT, BPF_JGE, BPF_JSET,
+        BPF_X, BPF_TAX, BPF_TXA, BPF_A,
+    )
 
 
 class BpfEmulator:

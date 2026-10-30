@@ -10,7 +10,10 @@ the kernel holds the pointer.
 """
 import ctypes
 from typing import List
-from LightPacket.LightBPF.CompilerSet.Instruction import Instruction
+try:
+    from LightPacket.LightBPF.CompilerSet.Instruction import Instruction
+except ImportError:
+    from LightBPF.CompilerSet.Instruction import Instruction  # type: ignore
 
 
 class bpf_insn(ctypes.Structure):

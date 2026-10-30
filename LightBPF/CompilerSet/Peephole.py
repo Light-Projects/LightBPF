@@ -18,8 +18,12 @@ All passes preserve semantics: they only remove work or short-circuit
 jumps that would have executed anyway.
 """
 from typing import List,Set
-from LightPacket.LightBPF.CompilerSet.Instruction import Instruction
-from LightPacket.LightBPF.CompilerSet.Opcode import BPF_JMP, BPF_JA, BPF_RET, insn_class, insn_op
+try:
+    from LightPacket.LightBPF.CompilerSet.Instruction import Instruction
+    from LightPacket.LightBPF.CompilerSet.Opcode import BPF_JMP, BPF_JA, BPF_RET, insn_class, insn_op
+except ImportError:
+    from LightBPF.CompilerSet.Instruction import Instruction  # type: ignore
+    from LightBPF.CompilerSet.Opcode import BPF_JMP, BPF_JA, BPF_RET, insn_class, insn_op  # type: ignore
 
 
 def optimize(code: List[Instruction]) -> List[Instruction]:
