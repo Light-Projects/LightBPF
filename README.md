@@ -2,6 +2,10 @@
 
 # LightBPF: Pure-Python Berkeley Packet Filter (cBPF) Engine
 
+[![Version 1.2.0](https://img.shields.io/badge/version-1.2.0-orange.svg)](https://github.com/Light-Projects/LightBPF)
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
+[![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
+
 **LightBPF** is a standalone, pure-Python Berkeley Packet Filter engine for packet sniffing, inspection, and network security applications. It tokenizes, parses, compiles, disassembles, and emulates classic BPF (cBPF / pcap-filter) bytecode with zero native C dependencies.
 
 ```
@@ -1001,7 +1005,22 @@ tcp or udp or tcp     # collapses to `tcp or udp`
 
 - **Lexer** (`Lexer.py`) — byte-for-byte unchanged. Token set, regex ordering, and normalisation rules are untouched.
 - **Parser** (`Parser.py`) — byte-for-byte unchanged. Recursive-descent grammar and AST node shapes are preserved.
-- **Public import path** — `from LightPacket.LightBPF.CompilerSet import Compiler, Emulator, Disassembler` continues to work via the package's `__init__.py` re-exports.
 - **Emulator semantics** — the VM itself is unchanged except for the `ret a` fix (Fix 9). It benefits indirectly from the `__repr__` fix, but instruction dispatch is otherwise identical.
 
-> **Not implemented by design.** Several libpcap features require data unavailable at filter-compile time or cannot be expressed in classic BPF: `gateway` (needs the host's MAC address), `inbound`/`outbound` (needs socket metadata), and `protochain` (needs IPv6 extension-header traversal). All three now raise `NotImplementedError` with a message explaining why, instead of silently miscompiling.
+---
+
+## v1.2.0 Extensible Architecture & Release Notes
+
+LightBPF v1.2.0 introduces a modular, pluggable link-type architecture and directional filtering support:
+
+1. **Modular Link-Type System (`LinkLayers`)**:
+   - Filter compilation for data link layers is abstracted into [`BaseLinkType`](file:///home/heretic/Documents/Light-Scan%20Project/Documents/My%20Project/Light-Scan/LightPacket/LightBPF/CompilerSet/LinkLayers/BaseLinkType.py).
+   - Dedicated [`EthernetLinkType`](file:///home/heretic/Documents/Light-Scan%20Project/Documents/My%20Project/Light-Scan/LightPacket/LightBPF/CompilerSet/LinkLayers/Ethernet.py) handles standard 10/100/1000/10000+ Mb/s Ethernet frames (`DLT_EN10MB = 1`).
+   - Dynamic link-layer registration via `BpfCompiler.register_link_type(dlt_code, HandlerClass)` for easy expansion to new link types (such as `DLT_NULL`, `DLT_RAW`, `DLT_LINUX_SLL`, `DLT_IEEE802_11`).
+
+2. **Inbound & Outbound Ethernet Filtering**:
+   - `inbound` and `outbound` are now supported for Ethernet links by dynamically matching against the host's MAC address resolved via `LightPacket.GetMac`.
+   - Supports compile-time overrides: `BpfCompiler.compile_str("inbound", host_mac="...")` or `BpfCompiler.compile_str("outbound", interface="eth0")`.
+
+3. **Magic Numbers and Strings Elimination**:
+   - All protocol constants, standard EtherTypes, IP protocol numbers, and header offsets are cleanly defined in [`Constants.py`](file:///home/heretic/Documents/Light-Scan%20Project/Documents/My%20Project/Light-Scan/LightPacket/LightBPF/Constants.py).
