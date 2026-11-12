@@ -34,7 +34,7 @@ If you use LightBPF through [LightPacket](https://github.com/Light-Projects/Ligh
 
 Report vulnerabilities **privately** by email:
 
-- **adamboulaaz92@gmail.com**
+- **lightscanframework@gmail.com**
 
 Suggested subject line: `[SECURITY] LightBPF: short description`
 
