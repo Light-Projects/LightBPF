@@ -24,7 +24,7 @@ LightBPF compiles filter expressions into bytecode that is attached to the kerne
 
 Older versions are **not** actively supported. Please upgrade and confirm the issue still reproduces before reporting.
 
-If you use LightBPF through [LightPacket](https://github.com/Light-Projects/LightPacket), note that LightPacket v1.0.4 and newer are the supported releases on that side.
+If you use LightBPF through [LightPacket](https://github.com/Light-Projects/LightPacket), note that LightPacket v1.0.0 and newer are the supported releases on that side.
 
 ## Reporting a Vulnerability
 
@@ -83,7 +83,7 @@ The following are generally **not** considered vulnerabilities in LightBPF:
 
 - Anything requiring an attacker to *already* have root/Administrator access on the host
 - Clean, expected Python exceptions raised for invalid filter syntax
-- Vulnerabilities in the OS kernel's BPF implementation, `libpcap`, Npcap, or other third-party software (please report those upstream)
+- Vulnerabilities in the OS kernel's BPF implementation, `Libpcap`, `Npcap`, or other third-party software (please report those upstream)
 - Issues only present in unsupported versions
 - Applications that pass untrusted filter strings *by design* without any validation or limits, when LightBPF itself behaves as documented. A hang or crash in LightBPF on such input is still in scope, however.
 
