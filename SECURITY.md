@@ -1,8 +1,8 @@
 # Security Policy
 
-Thank you for helping keep LightPacket and its users safe. 
+Thank you for helping keep LightBPF and its users safe. 
 
-LightPacket is a raw packet crafting and sniffing library that runs with elevated privileges. That makes security reports especially important to us, and we take them seriously.
+LightBPF compiles filter expressions into bytecode that is attached to the kernel, usually by programs running with elevated privileges. A flaw in the compiler can therefore have real consequences, and we take security reports seriously.
 
 ## Table of Contents
 
@@ -13,20 +13,18 @@ LightPacket is a raw packet crafting and sniffing library that runs with elevate
 - [Out of Scope](#out-of-scope)
 - [Response Process](#response-process)
 - [Safe Harbor](#safe-harbor)
-- [Responsible Use](#responsible-use)
 
 ---
 
 ## Supported Versions
 
-Only the following versions receive security fixes:
-
 | Component | Supported Versions |
-|-----------|-------------------|
-| **LightPacket** | v1.0.0 and newer  |
-| **LightBPF** | v1.1.0 and newer  |
+|-----------|--------------------|
+| **LightBPF** | v1.1.0 and newer   |
 
-Older versions are **not** actively supported. If you are running one, please upgrade before reporting, and check whether the issue still reproduces on a supported release.
+Older versions are **not** actively supported. Please upgrade and confirm the issue still reproduces before reporting.
+
+If you use LightBPF through [LightPacket](https://github.com/Light-Projects/LightPacket), note that LightPacket v1.0.4 and newer are the supported releases on that side.
 
 ## Reporting a Vulnerability
 
@@ -34,82 +32,79 @@ Older versions are **not** actively supported. If you are running one, please up
 >
 > Public reports can put users at risk before a fix is available.
 
-Instead, report vulnerabilities **privately** by email:
+Report vulnerabilities **privately** by email:
 
-- **lightscanframework@gmail.com**
+- **adamboulaaz92@gmail.com**
 
-Suggested subject line: `[SECURITY] LightPacket: short description`
+Suggested subject line: `[SECURITY] LightBPF: short description`
 
-To help us triage quickly, please include as much of the following as you can:
+Please include as much of the following as you can:
 
-- Affected component (LightPacket, LightBPF, or both) and version
-- Operating system and version, Python version, and `Libpcap` / `Npcap` version
+- LightBPF version, Python version, and operating system
 - A clear description of the issue and its potential impact
-- Step-by-step reproduction instructions
-- A proof of concept, such as a crafted packet (hex dump or `.pcap`), filter string, or script
-- Crash output, tracebacks, or core dump details, if applicable
+- The **exact filter string** (or input) that triggers it
+- Step-by-step reproduction instructions or a small script
+- Observed vs. expected behavior (crash output, hang details, or the incorrect bytecode produced)
 - Any suggested fix or mitigation
-
-If you'd like to send sensitive attachments, let us know in your first email and we'll arrange a suitable method.
 
 ## Threat Model
 
-Understanding how LightPacket is used helps explain how we rate severity.
+**Filters are compiled into kernel-attached programs.** LightBPF takes a filter string and produces cBPF bytecode that the operating system runs against every packet on a socket. If the bytecode doesn't do what the filter says, traffic can be wrongly accepted or dropped.
 
-**Raw sockets need privileges.** To open raw sockets, BPF devices, or Npcap handles, LightPacket must typically run as **root** (Linux/macOS/BSD), with `CAP_NET_RAW`, or as **Administrator** (Windows). Processes with these privileges are high-value targets: a bug that crashes or hijacks them can affect the entire host.
+**Filter strings may be untrusted.** Applications may build filters from user input, configuration files, or network-facing APIs. The Lexer, Parser, and Compiler must handle hostile or malformed input safely.
 
-**Packet data is untrusted input.** Anything received from the network, including frames, headers, options, and length fields, may be crafted by an attacker. LightPacket's parsers and the socket layer must handle hostile or malformed data safely.
+**The host process is often privileged.** LightBPF is typically used together with raw sockets, which require root/Administrator (or `CAP_NET_RAW`). A crash or hang in that process affects a high-value target.
 
-**`ctypes` removes Python's safety net.** Because LightPacket binds directly to C-level APIs (`AF_PACKET`, BPF devices, Npcap, `libpcap`), mistakes such as struct misalignment, wrong `argtypes`/`restype`, bad buffer sizes, or freed memory can cause memory corruption or crashes that pure Python code would never produce.
+**Zero dependencies means a small, auditable surface.** LightBPF is pure Python with no third-party code. The only native boundary is the thin `ctypes` layer used to attach programs to the kernel, which is where memory-safety mistakes (struct misalignment, wrong argument types, buffer lifetime) can cause crashes such as segmentation faults.
 
-Given this, we consider the following **high-priority vulnerabilities**:
+Given this, we treat the following as **high priority**:
 
-- **Crashes (e.g. segmentation faults)** caused by `ctypes` misalignment, incorrect struct layouts, invalid pointer handling, or buffer mismanagement, particularly when triggered by received packets or crafted filter input.
-- **Denial of Service via infinite loops or unbounded resource use** in the packet parser, filter compiler, or capture loop (e.g. a malformed header that causes the parser to never make progress, or a field that triggers excessive memory allocation).
-- **Memory safety issues** such as out-of-bounds reads/writes, use-after-free, or buffer overflows in the `ctypes` layer.
-- **Privilege-related flaws**, such as anything that could allow an unprivileged party to influence behavior of a privileged LightPacket process in unintended ways.
+- **Denial of Service in the compiler pipeline**: infinite loops in the Lexer or Parser, unbounded recursion, or exponential time or memory use triggered by a crafted filter (for example, deeply nested parentheses or very long boolean chains).
+- **Incorrect bytecode generation**: filters that compile to programs which don't match the documented semantics in a security-relevant way (for example, an `and`/`or`/`not` precedence error, a wrong offset or mask, or a jump that lands on the wrong instruction).
+- **Invalid or oversized programs**: output that exceeds cBPF limits (such as program length or the single-byte conditional jump range) without being detected, causing silent truncation, wrap-around, or kernel rejection.
+- **Crashes and memory-safety issues** in the `ctypes` attachment layer, including segmentation faults from misaligned structures or invalid pointers.
 
-A crash or hang in a process holding raw-socket privileges is a **security issue**, not just a stability bug. Please report it privately even if you aren't sure it's exploitable.
+A crash or hang in a privileged process is a **security issue**, not merely a stability bug. If in doubt, report it privately.
 
 ## What Counts as a Vulnerability
 
 Examples of reports we want to hear about:
 
-- A crafted packet that makes a sniffer crash, hang, or consume unbounded CPU or memory
-- A malformed BPF filter string that crashes the compiler or emits **incorrect bytecode** that bypasses the intended filter in a way that could be security-relevant
-- Out-of-bounds access when parsing protocol headers
-- Incorrect handling of length, offset, or count fields from the wire
-- Unsafe temporary file, device, or handle usage in the platform socket layers
-- Platform-specific crashes (for example, only on one BSD or on Windows) that can be triggered remotely or by crafted input
+- A filter string that makes the Lexer, Parser, or Compiler hang or consume unbounded CPU or memory
+- A filter that compiles to bytecode with semantics different from what was requested
+- Integer overflow or wrap-around in jump offsets, constants, or program length
+- A crafted filter that causes an interpreter crash (not just a Python exception)
+- Platform-specific crashes in the socket-attachment code
+- Error handling that swallows a compilation failure and silently attaches a wrong or empty program
 
 ## Out of Scope
 
-The following are generally **not** considered vulnerabilities in LightPacket:
+The following are generally **not** considered vulnerabilities in LightBPF:
 
-- Behavior that requires an attacker to *already* have root/Administrator access on the machine
-- Misuse of the library to send traffic the user intended to send (crafting packets is the library's purpose)
-- Vulnerabilities in third-party dependencies such as `libpcap`, Npcap, or the operating system (please report those upstream), though we welcome a heads-up if LightPacket can mitigate them
+- Anything requiring an attacker to *already* have root/Administrator access on the host
+- Clean, expected Python exceptions raised for invalid filter syntax
+- Vulnerabilities in the OS kernel's BPF implementation, `libpcap`, Npcap, or other third-party software (please report those upstream)
 - Issues only present in unsupported versions
-- Reports without a plausible security impact (ordinary bugs can be filed as public issues)
+- Applications that pass untrusted filter strings *by design* without any validation or limits, when LightBPF itself behaves as documented. A hang or crash in LightBPF on such input is still in scope, however.
 
-If you're unsure which category your finding falls into, **email us**. We'd rather hear about it.
+Not sure whether something qualifies? **Email us**; we'd rather hear about it.
 
 ## Response Process
 
-LightPacket is maintained by a solo developer, so timelines are best-effort, but here is what you can expect:
+LightBPF is maintained by a solo developer, so timelines are best-effort:
 
 | Step | Target |
 |------|--------|
 | Acknowledgement of your report | Within **5 business days** |
 | Initial assessment and severity rating | Within **10 business days** |
-| Fix or mitigation for high-severity issues | As quickly as possible; we'll keep you updated |
+| Fix or mitigation for high-severity issues | As quickly as possible, with updates along the way |
 | Public disclosure | Coordinated with you after a fix is released |
 
-We follow **coordinated disclosure**: we ask that you give us a reasonable window (typically up to **90 days**) to investigate and release a fix before any public disclosure. We're happy to credit you in the release notes and advisory unless you prefer to remain anonymous.
+We follow **coordinated disclosure** and ask for a reasonable window (typically up to **90 days**) before public disclosure. With your permission, we'll credit you in the release notes and advisory.
 
 When a fix is ready, we will:
 
-1. Release patched versions of the affected component(s)
+1. Release a patched version of LightBPF
 2. Publish a GitHub Security Advisory (and request a CVE where appropriate)
 3. Describe the impact, affected versions, and upgrade steps
 
@@ -117,12 +112,8 @@ When a fix is ready, we will:
 
 We support good-faith security research. If you make a genuine effort to follow this policy (avoid privacy violations, don't disrupt systems or networks you don't own, and give us time to respond), we will not pursue or support legal action against you for your research.
 
-Please test only against systems and networks that you own or have explicit permission to test.
-
-## Responsible Use
-
-LightPacket is a powerful tool for network engineering, education, testing, and security research. Please use it responsibly, and only on networks and systems you are authorized to work with. Running as root and sending raw traffic can disrupt networks, so test in isolated environments such as VMs or loopback interfaces whenever possible.
+Please test only on systems and networks that you own or have explicit permission to test.
 
 ---
 
-Thank you for helping us keep LightPacket secure! 
+Thank you for helping us keep LightBPF secure! 

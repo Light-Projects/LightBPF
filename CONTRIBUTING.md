@@ -1,21 +1,19 @@
-# Contributing to LightPacket
+# Contributing to LightBPF
 
 First off, **thank you** for taking the time to contribute! 
 
-LightPacket is maintained by a **solo developer**, which means every bug report, pull request, documentation fix, and test run on an unusual OS makes a real difference. You don't need to be a networking or `ctypes` expert to help. Curiosity and care are plenty.
-
-This document explains how the project is organized, how to get a development environment running, and where you can jump in.
+LightBPF is maintained by a **solo developer**, so every bug report, test case, documentation fix, and pull request genuinely moves the project forward. You don't need to be a compiler or kernel expert to help. If you can read a filter expression and tell us whether the output looks right, you're already useful.
 
 ---
 
 ## Table of Contents
 
 - [Code of Conduct](#code-of-conduct)
-- [About the Project](#about-the-project)
+- [About LightBPF](#about-lightbpf)
 - [Project Architecture](#project-architecture)
 - [Good First Issues](#good-first-issues)
 - [Development Setup](#development-setup)
-- [Testing and the OS Matrix](#testing-and-the-os-matrix)
+- [Testing](#testing)
 - [Submitting Changes](#submitting-changes)
 - [Coding Guidelines](#coding-guidelines)
 - [Reporting Bugs](#reporting-bugs)
@@ -26,20 +24,23 @@ This document explains how the project is organized, how to get a development en
 
 ## Code of Conduct
 
-Be kind, be patient, and assume good intent. This is a small project and we want it to stay a friendly place for beginners and experts alike. Harassment, personal attacks, or discriminatory behavior won't be tolerated.
+Be kind, be patient, and assume good intent. This is a small project and we want it to stay welcoming to beginners and experts alike. Harassment, personal attacks, and discriminatory behavior won't be tolerated.
 
-## About the Project
+## About LightBPF
 
-The repository contains two closely related components:
+**LightBPF** is a **zero-dependency, pure-Python classic BPF (cBPF) compiler**. It compiles human-readable filters such as `tcp port 80` into bytecode that can be attached directly to the kernel. It is the filter engine behind [LightPacket](https://github.com/Light-Projects/LightPacket), and it acts as a **fallback when `libpcap` is not installed**.
 
-- **LightPacket**: a cross-platform Python library for raw packet crafting, sniffing, and manipulation. It supports **Linux, Windows, Unix Like-Systems, macOS, FreeBSD, NetBSD, OpenBSD, and DragonFlyBSD**.
-- **LightBPF**: a zero-dependency, pure-Python classic BPF (cBPF) compiler. It turns human-readable filters such as `tcp port 80` into bytecode that can be attached directly to the kernel, and acts as a fallback when `libpcap` is not installed.
+Key goals:
 
-Both are licensed under **MPL-2.0**.
+- **Zero dependencies**: standard library only, so it works anywhere Python runs.
+- **Correctness first**: the bytecode must match the semantics of the filter, on every supported platform.
+- **Portability**: it targets Linux, Windows, macOS, FreeBSD, NetBSD, OpenBSD, and DragonFlyBSD (via LightPacket's socket layers).
+
+Licensed under **MPL-2.0**.
 
 ## Project Architecture
 
-LightPacket leans heavily on `ctypes` to talk to C-level system APIs (`AF_PACKET`, BPF devices, Npcap, and `libpcap`). The filter pipeline in LightBPF is a classic compiler front-to-back flow:
+A filter string travels through a classic compiler pipeline before reaching the kernel:
 
 ```
  "tcp port 80"
@@ -48,30 +49,32 @@ LightPacket leans heavily on `ctypes` to talk to C-level system APIs (`AF_PACKET
  ┌─────────┐    ┌─────────┐    ┌──────────┐    ┌──────────────────┐
  │  Lexer  │ ─▶ │ Parser  │ ─▶ │ Compiler │ ─▶ │ ctypes Sockets   │
  └─────────┘    └─────────┘    └──────────┘    └──────────────────┘
-  tokens         AST            cBPF bytecode   attach filter &
-                                                read/write frames
+  tokens         AST            cBPF bytecode   attach program to
+                                                the kernel
 ```
 
-| Stage | What it does |
-|-------|--------------|
-| **Lexer** | Breaks the filter string into tokens (keywords, numbers, addresses, operators). |
-| **Parser** | Builds an abstract syntax tree (AST) from the tokens, handling precedence and primitives like `tcp`, `port`, `host`. |
-| **Compiler** | Walks the AST and emits cBPF instructions (jumps, loads, returns). |
-| **ctypes Sockets** | Platform-specific socket layers that open raw sockets or BPF devices, attach the compiled program (or hand the filter to `libpcap` / Npcap), and send/receive frames. |
+| Stage | Responsibility |
+|-------|----------------|
+| **Lexer** | Splits the filter string into tokens: keywords (`tcp`, `port`, `and`), numbers, addresses, operators, parentheses. |
+| **Parser** | Builds an abstract syntax tree (AST) from the tokens, handling precedence (`not` > `and` > `or`) and filter primitives. |
+| **Compiler** | Walks the AST and emits cBPF instructions (loads, ALU ops, conditional jumps, returns), resolving jump targets. |
+| **ctypes Sockets** | Hands the finished program to the OS (for example, `sock_fprog` with `SO_ATTACH_FILTER` on Linux, or `bpf_program` via `BIOCSETF` on BSD-family systems) through `ctypes`. |
 
-> **Heads-up:** The socket layer is where most platform quirks live. Struct layouts, alignment, pointer lifetimes, and differences between BSD `bpf` and Linux `AF_PACKET` are the usual suspects when something misbehaves, so please take extra care when touching `ctypes` definitions.
+> **Heads-up:** cBPF has hard limits worth keeping in mind: a maximum program length, and conditional jump offsets that fit in a single byte. Changes to the compiler should always consider how very large or deeply nested filters behave.
 
 ## Good First Issues
 
-Not sure where to start? Here are some friendly entry points:
+Not sure where to begin? Try one of these:
 
--  **Documentation**: improve the README, add usage examples, write docstrings, or clarify the filter syntax LightBPF supports.
--  **Add EtherTypes / protocol definitions**: extend the protocol tables with new EtherTypes (and their headers, if you're feeling adventurous), with a test for each.
--  **Test on different operating systems**: run the test suite on a platform you have access to (especially NetBSD, DragonFlyBSD, or an older macOS/Windows version) and report what works and what doesn't.
--  **Expand test coverage**: add tests for filter expressions, malformed packets, and edge cases.
--  **Triage issues**: reproduce reported bugs and add details like OS version, Python version, and `libpcap` version.
+-  **Documentation**: document the supported filter syntax, add a cookbook of example filters, or improve docstrings.
+-  **Add EtherTypes and protocol keywords**: extend the supported protocols, each with a test and a note in the docs.
+-  **Add test cases**: compile a filter, compare the output with a reference (see [Testing](#testing)), and add it to the suite. Edge cases and unusual filters are especially valuable.
+-  **Improve error messages**: make syntax errors point to the exact position and explain what was expected.
+-  **Add a disassembler or pretty-printer**: a readable dump of the generated bytecode (similar to `tcpdump -d`) makes debugging much easier.
+-  **Test on different operating systems**: attach compiled programs on a platform you have access to (especially NetBSD, DragonFlyBSD, or Windows) and report whether the kernel accepts them.
+-  **Packaging**: help create a `.deb` package or other distribution packages.
 
-Look for issues labeled `good first issue` or `help wanted`. If you want to work on something, leave a quick comment so we don't duplicate effort.
+Look for issues labeled `good first issue` or `help wanted`. If you'd like to take one, leave a quick comment so we don't duplicate work.
 
 ## Development Setup
 
@@ -79,132 +82,106 @@ Look for issues labeled `good first issue` or `help wanted`. If you want to work
 
 - **Python 3.8+**
 - **Git**
-- **Root / Administrator privileges** for tests that open real raw sockets
-- **`libpcap`** (Linux/macOS/BSD) or **Npcap** (Windows) for testing the `libpcap` backend. LightBPF itself has no dependencies, but you'll want `libpcap` available to compare behavior.
+- *(Optional but recommended)* **`libpcap`** and **`tcpdump`** to compare LightBPF's output with a reference implementation. LightBPF itself needs neither.
+- *(Optional)* **Root / Administrator privileges** for tests that attach filters to real sockets. The Lexer, Parser, and Compiler can be tested entirely without privileges.
 
-### 1. Fork and clone
-
-```bash
-git clone https://github.com/Light-Projects/LightPacket.git
-cd LightPacket
-git remote add upstream https://github.com/Light-Projects/LightPacket.git
-```
-
-### 2. Create a virtual environment
+### Setup
 
 ```bash
+git clone https://github.com/Light-Projects/LightBPF.git
+cd LightBPF
+git remote add upstream https://github.com/Light-Projects/LightBPF.git
+
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e .
 pip install pytest               # or your preferred test runner
 ```
 
-### 3. Install the native dependencies
+Installing the optional native tools:
 
 | OS | Command |
 |----|---------|
 | **Debian / Ubuntu** | `sudo apt install libpcap-dev tcpdump` |
 | **Fedora / RHEL** | `sudo dnf install libpcap-devel tcpdump` |
 | **Arch** | `sudo pacman -S libpcap tcpdump` |
-| **macOS** | `libpcap` ships with the OS; optionally `brew install libpcap` |
-| **FreeBSD / OpenBSD / NetBSD / DragonFlyBSD** | `libpcap` is part of the base system on most; otherwise install via `pkg` / `pkg_add` / `pkgin` |
-| **Windows** | Install [Npcap](https://npcap.com/) (enable *WinPcap API-compatible mode* if prompted) |
+| **macOS** | Ships with `libpcap` and `tcpdump`; optionally `brew install libpcap` |
+| **FreeBSD / OpenBSD / NetBSD / DragonFlyBSD** | Usually part of the base system; otherwise install via `pkg` / `pkg_add` / `pkgin` |
+| **Windows** | Install [Npcap](https://npcap.com/) (and optionally WinDump) |
 
-> `tcpdump` is handy for comparing filter output against LightBPF's bytecode (`tcpdump -d "tcp port 80"`).
-
-### 4. Run the tests
+## Testing
 
 ```bash
-# Tests that don't need privileges
+# Unprivileged tests: lexer, parser, compiler
 pytest
 
-# Tests that open raw sockets (need elevated privileges)
+# Tests that attach filters to real sockets (need elevated privileges)
 sudo -E env "PATH=$PATH" pytest      # Linux / macOS / BSD
 # Windows: run your terminal as Administrator
 ```
 
-> **Be careful when running as root.** Raw sockets can send arbitrary traffic. Test on an isolated network, loopback, or a VM whenever possible, and never against systems you don't own or have permission to test.
+### How to test compiler changes
 
-## Testing and the OS Matrix
+1. **Unit tests per stage.** Test tokens from the Lexer, the AST from the Parser, and the instruction list from the Compiler separately.
+2. **Compare against a reference.** For a given filter, compare LightBPF's bytecode (or its behavior) with `tcpdump -d "<filter>"` or `libpcap`'s output. Exact instruction layout may differ, but the *semantics* must match.
+3. **Test behavior, not just bytes.** Where possible, run the compiled program against sample packets (hand-built frames or `.pcap` captures) and check which are accepted or rejected.
+4. **Test the limits.** Very long filters, deeply nested parentheses, long `or` chains, and invalid input should fail cleanly with a clear error. They should never hang or crash.
 
-LightPacket targets **seven operating systems**, and platform differences are the single biggest source of bugs. Before opening a PR, please:
+### Platform matrix
 
-1. Run the test suite on **at least one** OS you have access to and note which one in your PR.
-2. If your change touches the **socket layer or `ctypes` structs**, think through how it behaves on other platforms (struct padding, endianness, `sizeof` differences, BSD vs. Linux semantics).
-3. If you can, test on **both a Linux system and a BSD-family system**.
+LightBPF runs on **seven operating systems** through LightPacket's socket layers, and kernels differ in how they accept and validate programs. When you change anything in the socket-attachment code (or the `ctypes` structures it uses), please:
 
-| Platform | Backends | Notes |
-|----------|----------|-------|
-| Linux | `AF_PACKET`, `libpcap` | Needs `CAP_NET_RAW` or root |
-| Windows | Npcap | Needs Administrator, Npcap installed |
-| macOS | BPF devices, `libpcap` | Needs root or access to `/dev/bpf*` |
-| FreeBSD | BPF devices, `libpcap` | Needs root or access to `/dev/bpf*` |
-| NetBSD | BPF devices, `libpcap` | Needs root or access to `/dev/bpf*` |
-| OpenBSD | BPF devices, `libpcap` | Needs root or access to `/dev/bpf*` |
-| DragonFlyBSD | BPF devices, `libpcap` | Needs root or access to `/dev/bpf*` |
+- Say in your PR which OS you tested on.
+- Think through struct layout, padding, and `sizeof` differences between platforms.
+- If possible, test on both a Linux system and a BSD-family system.
 
-Don't have all seven? **That's completely fine.** Say what you tested and what you couldn't, and we'll work out the rest together (for example, via VMs or community testers).
+Don't have all seven? **That's completely fine.** Say what you tested and what you couldn't, and we'll sort out the rest together.
 
-### Tips for good tests
-
-- Prefer **pure unit tests** (no privileges, no network) for the Lexer, Parser, and Compiler. These run everywhere.
-- Compare compiled LightBPF bytecode against known-good output (e.g. from `tcpdump -d`) when adding filter features.
-- Mark tests that need root/Administrator or a specific OS so they skip cleanly elsewhere.
+> Run privileged tests in a VM or on loopback where possible, and never against systems you don't own or have permission to test.
 
 ## Submitting Changes
 
-1. **Open an issue first** for anything substantial, so we can agree on direction before you invest time.
+1. **Open an issue first** for anything substantial so we can agree on direction.
 2. **Create a branch** from `main`:
    ```bash
    git checkout -b feature/short-description
    ```
-3. **Make focused changes.** Small, single-purpose PRs are much easier to review than large ones.
-4. **Add or update tests and docs** for your change.
-5. **Run the tests** on your OS and mention it in the PR.
-6. **Open a pull request** and fill out the description: what changed, why, and how you tested it.
+3. **Keep changes focused.** Small, single-purpose PRs are much easier to review.
+4. **Add or update tests and docs.**
+5. **Run the tests** and mention your OS and Python version in the PR.
+6. **Open a pull request** describing what changed, why, and how you tested it.
 
-Since this is a solo-maintained project, reviews may take a few days. Thanks in advance for your patience! A friendly ping after a week is always welcome.
-
-### Commit messages
-
-Clear and descriptive is the goal. Something like:
-
-```
-Add EtherType definition for LLDP
-
-- Add constant and header parser
-- Add unit test with a captured frame
-```
+Reviews may take a few days since the project is solo-maintained. A friendly ping after a week is always welcome.
 
 ## Coding Guidelines
 
-- **Python 3.8+ compatible**: avoid syntax and stdlib features newer than 3.8.
-- **LightBPF stays zero-dependency.** Please don't add third-party imports to it.
-- Follow **PEP 8** and keep lines reasonably short.
-- Add **type hints** and **docstrings** to public functions and classes.
-- With **`ctypes`**:
-  - Always declare `argtypes` and `restype` for foreign functions. Defaults can silently truncate pointers on 64-bit systems.
-  - Double-check struct field order, sizes, and padding per platform.
-  - Keep references to buffers alive for as long as C code may use them.
-  - Validate lengths before slicing or casting packet data. Never trust sizes from the wire.
-- Avoid unbounded loops when parsing packet data; always make sure parsing makes forward progress.
+- **Python 3.8+ compatible**: avoid newer syntax and stdlib features.
+- **Zero dependencies**: please don't add third-party imports. Standard library only.
+- Follow **PEP 8**, and add **type hints** and **docstrings** to public APIs.
+- **Never trust input.** Filter strings may come from users or other programs. Validate lengths, nesting depth, and numeric ranges.
+- **Always make forward progress.** Lexer and Parser loops must consume input on every iteration; avoid constructs that can loop forever or recurse without bound.
+- **Fail loudly and cleanly.** Raise a specific, descriptive exception on invalid filters instead of emitting questionable bytecode.
+- **`ctypes` hygiene** (socket attachment code):
+  - Declare `argtypes` and `restype` for foreign functions.
+  - Keep buffers and instruction arrays alive for as long as C code may use them.
+  - Double-check struct field order and size per platform.
 
 ## Reporting Bugs
 
-Please [open an issue](https://github.com/Light-Projects/LightPacket/issues) and include:
+Please [open an issue](https://github.com/Light-Projects/LightBPF/issues) and include:
 
-- LightPacket and/or LightBPF version
-- Operating system and version
-- Python version (`python --version`)
-- `libpcap` / Npcap version, if relevant
-- Steps to reproduce, expected behavior, and actual behavior
-- Tracebacks, or crash output / core dump details for segfaults
+- LightBPF version
+- Operating system and version, and Python version
+- The **exact filter string** that triggers the problem
+- Expected vs. actual behavior (for example, the bytecode produced, or which packets matched incorrectly)
+- Output of `tcpdump -d "<filter>"` for comparison, if available
+- Tracebacks, or crash details if the interpreter crashed
 
-**Is it a security vulnerability?** Please **do not** open a public issue. See [SECURITY.md](SECURITY.md) instead.
+**Is it a security vulnerability?** Please **do not** open a public issue. See [SECURITY.md](SECURITY.md).
 
 ## Security Issues
 
-Because LightPacket operates with elevated privileges, crashes and parser hangs can have security implications. If you believe you've found one, follow the private disclosure process in [SECURITY.md](SECURITY.md).
+A compiler that produces incorrect filters, or that can be made to hang or crash by crafted input, can have security implications. Please follow the private disclosure process in [SECURITY.md](SECURITY.md).
 
 ## License
 
@@ -212,4 +189,4 @@ By contributing, you agree that your contributions will be licensed under the [M
 
 ---
 
-Thank you again for helping make LightPacket better. Happy hacking! 
+Thank you for helping make LightBPF better. Happy hacking! 
